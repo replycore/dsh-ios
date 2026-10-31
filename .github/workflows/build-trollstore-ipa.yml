@@ -52,6 +52,18 @@ jobs:
       - name: Build iSH-ARM64 emulator CLI
         run: make emulator
 
+      # The emulator's sys_uname() does strcpy(hostname) into a 65-byte field;
+      # the GH runner's nodename is longer than that, so the fortified libc
+      # aborts the emulator as soon as the guest calls uname() (apk does).
+      # A short hostname avoids the overflow without touching upstream code.
+      - name: Shorten runner hostname (ish uname workaround)
+        run: |
+          sudo scutil --set HostName dshbuild
+          sudo scutil --set LocalHostName dshbuild
+          sudo scutil --set ComputerName dshbuild
+          uname -n
+          test "$(uname -n | wc -c)" -lt 65
+
       - name: Build guest rootfs (Alpine + Node 22 + dsh)
         run: make rootfs
 
