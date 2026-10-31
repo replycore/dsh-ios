@@ -71,6 +71,17 @@ static NSString *const kDSHUserAgentSuffix = @" DSH-iOS/1.0";
     config.websiteDataStore = WKWebsiteDataStore.defaultDataStore;
     config.applicationNameForUserAgent = kDSHUserAgentSuffix;
     config.defaultWebpagePreferences.allowsContentJavaScript = YES;
+    // WebKit polyfills for iOS 15 (DSHWebPolyfill.js, injected before any
+    // page script): the dsh web UI targets a modern WebKit and e.g. calls
+    // AbortSignal.timeout(), which does not exist on iOS 15.5.
+    NSString *polyfillPath = [NSBundle.mainBundle pathForResource:@"DSHWebPolyfill" ofType:@"js"];
+    NSString *polyfillSource = polyfillPath ? [NSString stringWithContentsOfFile:polyfillPath encoding:NSUTF8StringEncoding error:nil] : nil;
+    if (polyfillSource.length > 0) {
+        WKUserScript *polyfillScript = [[WKUserScript alloc] initWithSource:polyfillSource
+                                                             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                          forMainFrameOnly:NO];
+        [config.userContentController addUserScript:polyfillScript];
+    }
     self.webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:config];
     self.webView.navigationDelegate = self;
     self.webView.UIDelegate = self;
