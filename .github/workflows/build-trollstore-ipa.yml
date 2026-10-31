@@ -1,0 +1,91 @@
+# DSH — one-shot unsigned IPA build for TrollStore (iOS 15.5).
+#
+# Trigger manually (Actions ▸ Build TrollStore IPA ▸ Run workflow).
+# Produces DSH-trollstore-ios15.ipa:
+#   - built with IPHONEOS_DEPLOYMENT_TARGET=15.5 (upstream targets iOS 16)
+#   - no Apple signing (CODE_SIGNING_ALLOWED=NO), then ad-hoc re-signed with
+#     the project's entitlements so TrollStore installs it with full entitlements
+#
+# NOTE: this is a downstream packaging workflow; upstream has no CI because the
+# build needs an Apple Silicon Mac with Xcode.
+
+name: Build TrollStore IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select newest installed Xcode
+        run: |
+          set -x
+          ls -d /Applications/Xcode*.app
+          LATEST=$(ls -d /Applications/Xcode*.app \
+            | sed -e 's#.*/Xcode_##' -e 's#\.app$##' \
+            | grep -E '^[0-9]' | sort -V | tail -1)
+          echo "newest Xcode version dir: ${LATEST:-<none>}"
+          if [ -n "$LATEST" ] && [ -d "/Applications/Xcode_${LATEST}.app" ]; then
+            sudo xcode-select --switch "/Applications/Xcode_${LATEST}.app/Contents/Developer" || true
+          fi
+          xcodebuild -version
+
+      - name: Install build dependencies
+        run: |
+          brew install meson ninja lld node
+          for d in /opt/homebrew/opt/lld/bin /opt/homebrew/opt/llvm/bin; do
+            if [ -x "$d/ld.lld" ]; then echo "$d" >> "$GITHUB_PATH"; fi
+          done
+          command -v ld.lld
+          ld.lld --version | head -1
+          node --version
+          sudo gem install xcodeproj --no-document
+
+      - name: Build iSH-ARM64 emulator CLI
+        run: make emulator
+
+      - name: Build guest rootfs (Alpine + Node 22 + dsh)
+        run: make rootfs
+
+      - name: Regenerate Xcode project
+        run: make project
+
+      - name: Build unsigned app (deployment target 15.5)
+        run: |
+          set -o pipefail
+          xcodebuild -project DSH.xcodeproj -scheme DSH -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            IPHONEOS_DEPLOYMENT_TARGET=15.5 \
+            build 2>&1 | tee build/xcodebuild.log
+          echo '--- partial-availability warnings (APIs newer than iOS 15.5) ---'
+          grep -iE "partial availability|is only available on|not available on iOS" \
+            build/xcodebuild.log | sort -u | head -40 || true
+
+      - name: Ad-hoc sign and package IPA
+        run: |
+          APP=$(ls -dt ~/Library/Developer/Xcode/DerivedData/DSH-*/Build/Products/Release-iphoneos/DSH.app | head -1)
+          test -d "$APP" || { echo "DSH.app not found"; exit 1; }
+          echo "signing: $APP"
+          /usr/bin/codesign --force --sign - --entitlements app/DSH.entitlements \
+            --timestamp=none "$APP"
+          echo '--- embedded entitlements ---'
+          /usr/bin/codesign -d --entitlements - "$APP"
+          /usr/bin/codesign -dv "$APP" 2>&1 | head -8
+          rm -rf Payload DSH-IPA && mkdir -p Payload DSH-IPA
+          cp -R "$APP" Payload/
+          ( cd "$PWD" && /usr/bin/zip -qry DSH-IPA/DSH-trollstore-ios15.ipa Payload )
+          ls -lh DSH-IPA/DSH-trollstore-ios15.ipa
+          unzip -l DSH-IPA/DSH-trollstore-ios15.ipa | tail -5
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DSH-trollstore-ipa
+          path: DSH-IPA/DSH-trollstore-ios15.ipa
+          if-no-files-found: error
