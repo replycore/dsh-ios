@@ -37,7 +37,10 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install meson ninja lld node
+          # libarchive: the meson tools build only picks up a *system* libarchive
+          # (pkg-config / homebrew); without it the `fakefsify` target is
+          # skipped and make rootfs fails.
+          brew install meson ninja lld node libarchive
           for d in /opt/homebrew/opt/lld/bin /opt/homebrew/opt/llvm/bin; do
             if [ -x "$d/ld.lld" ]; then echo "$d" >> "$GITHUB_PATH"; fi
           done
