@@ -446,12 +446,16 @@ static const int64_t kQueryTimeoutSeconds = 5;
             @"end": [self isoString:workout.endDate],
             @"durationMinutes": @((NSInteger) round(workout.duration / 60.0)),
         } mutableCopy];
-        HKQuantity *energy = [workout statisticsForType:[HKQuantityType quantityTypeForIdentifier:HKQuantityTypeIdentifierActiveEnergyBurned]].sumQuantity;
-        if (energy)
-            row[@"activeEnergyKcal"] = @((NSInteger) round([energy doubleValueForUnit:HKUnit.kilocalorieUnit]));
-        HKQuantity *distance = [workout statisticsForType:[HKQuantityType quantityTypeForIdentifier:HKQuantityTypeIdentifierDistanceWalkingRunning]].sumQuantity;
-        if (distance)
-            row[@"distanceKm"] = [self rounded:[distance doubleValueForUnit:[HKUnit meterUnitWithMetricPrefix:HKMetricPrefixKilo]] places:2];
+        // -statisticsForType: is iOS 16+; on older systems skip energy/distance
+        // rather than crashing on an unrecognized selector.
+        if (@available(iOS 16.0, *)) {
+            HKQuantity *energy = [workout statisticsForType:[HKQuantityType quantityTypeForIdentifier:HKQuantityTypeIdentifierActiveEnergyBurned]].sumQuantity;
+            if (energy)
+                row[@"activeEnergyKcal"] = @((NSInteger) round([energy doubleValueForUnit:HKUnit.kilocalorieUnit]));
+            HKQuantity *distance = [workout statisticsForType:[HKQuantityType quantityTypeForIdentifier:HKQuantityTypeIdentifierDistanceWalkingRunning]].sumQuantity;
+            if (distance)
+                row[@"distanceKm"] = [self rounded:[distance doubleValueForUnit:[HKUnit meterUnitWithMetricPrefix:HKMetricPrefixKilo]] places:2];
+        }
         if (workout.sourceRevision.source.name.length)
             row[@"source"] = workout.sourceRevision.source.name;
         [rows addObject:row];
